@@ -43,43 +43,41 @@ SPECIALIZATIONS = {
     "Weapons Masters": {
         "aliases": ["weapons", "weapon", "wep"],
         "info": (
-            "Can skillfully make **Swords, Bows, Axes, Maces, Staffs, and Shields**. "
-            "When crafting these items, the recipe is treated as if it had **one additional star**. "
-            "If the recipe is at **five stars**, the Weapon Master has a chance to produce **Epic gear**. "
-            "Crafted weapons have stats comparable to dropped weapons."
+            "-Can skillfully make **Swords, Bows, Axes, Maces, Staffs, and Shields**.\n "
+            "-When crafting these items, the recipe is treated as if it had **one additional star**.\n"
+            "-If the recipe is at **five stars**, the Weapon Master has a chance to produce **Epic gear**.\n "
+            "-Crafted weapons have stats comparable to dropped weapons."
         )
     },
     "Armor Masters": {
         "aliases": ["armor", "armour"],
         "info": (
-            "Can skillfully make **Chest Armor, Gloves, Boots, Belts, and Helms**. "
-            "When crafting any armor, their recipe is treated as if it had **one additional star**. "
-            "If the recipe is at **five stars**, the Armor Master has a chance to produce **Epic gear**."
+            "-Can skillfully make **Chest Armor, Gloves, Boots, Belts, and Helms**.\n"
+            "-When crafting any armor, their recipe is treated as if it had **one additional star**.\n "
+            "-If the recipe is at **five stars**, the Armor Master has a chance to produce **Epic gear**."
         )
     },
     "Potions Masters": {
         "aliases": ["potions", "potion"],
         "info": (
-            "Skilled cooks who create Potions and Drams with a chance to gain between **1 and 4 extra potions or drams** "
-            "per craft without extra ingredients. Can create **Treasure Drams** (significantly increase Magic Find) and "
-            "**Malice Drams** (increase both Savagery and Brutality), which only they can make. "
-            "Note: Bonus potions may be lost if crafting with a full backpack, so free inventory slots are advised."
+            "-Skilled cooks who create Potions and Drams with a chance to gain between **1 and 4 extra potions or drams** per craft without extra ingredients.\n  "
+            "-Can create **Treasure Drams** (significantly increase Magic Find) and **Malice Drams** (increase both Savagery and Brutality), which only they can make.\n "
+            "**Note:** Bonus potions may be lost if crafting with a full backpack, so free inventory slots are advised."
         )
     },
     "Preparations Masters": {
         "aliases": ["preparations", "prep"],
         "info": (
-            "Skilled at creating preparation items. When crafting, the **gold cost is waived** (totally free), "
-            "but the master must have the gold initially. They can make three unique preparations that only they can make: "
-            "**Wood Pitch** (increases Onslaught on feet), **Mineral Oils** (increase Blasting on helms), and **Leather Stitching** "
-            "(increases Poise on belts)."
+            "-Skilled at creating preparation items.\n "
+            "-When crafting, the **gold cost is waived** (totally free), but the master must have the gold initially.\n "
+            "-They can make three unique preparations that only they can make: **Wood Pitch** (increases Onslaught on feet), **Mineral Oils** (increase Blasting on helms), and **Leather Stitching** (increases Poise on belts). "
         )
     },
     "Production Masters": {
         "aliases": ["production", "prod"],
         "info": (
-            "Skilled with **Motes of Yorick**. Have a bonus **5% Mote Reduction** chance, returning **all motes** when triggered instead of half. "
-            "Earn **50% more crafting experience**."
+            "-Skilled with **Motes of Yorick**. Have a bonus **5% Mote Reduction** chance, returning **all motes** when triggered instead of half.\n "
+            "-Earn **50% more crafting experience**."
         )
     },
 }
@@ -493,4 +491,5 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
     raise ValueError("DISCORD_TOKEN is not set.")
 bot.run(TOKEN)
+
 
