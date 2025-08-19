@@ -60,9 +60,9 @@ SPECIALIZATIONS = {
     "Potions Masters": {
         "aliases": ["potions", "potion"],
         "info": (
-            "- Skilled cooks who create Potions and Drams with a chance to gain between **1 and 4 extra potions or drams** per craft without extra ingredients.\n  "
-            "- Can create **Treasure Drams** (significantly increase Magic Find) and **Malice Drams** (increase both Savagery and Brutality), which only they can make.\n "
-            "**Note:** Bonus potions may be lost if crafting with a full backpack, so free inventory slots are advised.\n"
+            "- Skilled cooks who create Potions and Drams with a chance to gain between **1 and 4 extra potions or drams** per craft without extra ingredients.\n "
+            "- Only they can make **Treasure Drams** (significantly increase Magic Find) and **Malice Drams** (increase both Savagery and Brutality).\n "
+            " **Note:** Bonus potions may be lost if crafting with a full backpack, so free inventory slots are advised.\n"
         )
     },
     "Preparations Masters": {
@@ -491,6 +491,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
     raise ValueError("DISCORD_TOKEN is not set.")
 bot.run(TOKEN)
+
 
 
 
