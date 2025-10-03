@@ -1,110 +1,109 @@
-# Villagers & Heroes Bot
+# Villagers & Heroes Discord Bot
 
-A Discord bot to manage players and their crafting specializations in the game *Villagers & Heroes*.
-Supports **persistent storage via PostgreSQL**, interactive **dropdown menus**, pagination, and admin commands to manage players.
+This is a Discord bot designed for managing players and their specializations in the game "Villagers & Heroes." The bot features interactive UI elements, slash commands, per-server player data persistence, and a Flask-based keep-alive mechanism suitable for hosting on platforms like Render or Replit.
 
 ---
 
 ## Features
 
-* Persistent per-server player data using **PostgreSQL**.
-* Slash commands:
-
-  * `/menu` — Interactive specialization selection dropdown.
-  * `/specializations` — Show detailed specialization information.
-  * `/list` — List players for a specialization with pagination.
-  * `/all_players` — Show all players in the server.
-  * `/add` — Admin-only command to add players.
-  * `/remove` — Admin-only command to remove players.
-  * `/help` — Shows all commands.
-* Supports **aliases** for specializations.
-* Pagination for long player lists.
-* Fully persistent dropdown menus.
-* Keeps data safe across redeploys on Render.
-
----
-
-## Specializations
-
-* **Weapons Masters** — Swords, Bows, Axes, Maces, Staffs, Shields.
-* **Armor Masters** — Chest Armor, Gloves, Boots, Belts, Helms.
-* **Potions Masters** — Potions, Drams, Treasure Drams, Malice Drams.
-* **Preparations Masters** — Preparation items, free crafting cost, unique items.
-* **Production Masters** — Motes of Yorick, bonus experience, mote reduction.
-
-> Each specialization has aliases for easy commands.
-
----
-
-## Setup (Render)
-
-1. **Create PostgreSQL Database on Render**
-
-   * Go to Render → **New** → **PostgreSQL** → Free Plan
-   * Copy the **Internal Database URL**.
-
-2. **Deploy your bot on Render**
-
-   * Go to your bot service → **Environment** → **Environment Variables**
-   * Add:
-
-     | Key             | Value                             |
-     | --------------- | --------------------------------- |
-     | `DISCORD_TOKEN` | Your Discord Bot Token            |
-     | `DATABASE_URL`  | Your Render Internal Database URL |
-
-3. **Requirements**
-
-   * Python 3.11+
-   * `discord.py`
-   * `psycopg2-binary`
-   * `flask`
-
-4. **Install dependencies**
-
-```bash
-pip install -r requirements.txt
-```
-
-5. **Start bot**
-
-```bash
-python bot.py
-```
-
-> The bot includes a keep-alive Flask server for uptime monitoring.
+* **Specialization Management:** Track players under different specializations such as Weapons Masters, Armor Masters, Potions Masters, Preparations Masters, and Production Masters.
+* **Persistent Dropdown Menu:** Users can select a specialization from a persistent dropdown and view players in that category.
+* **Pagination:** Player lists with many entries are paginated for easier viewing.
+* **Admin Commands:** Add or remove players from specializations using `/add` and `/remove` commands.
+* **Rich Help & Info:** Use `/help` to view commands and `/specializations` to get detailed specialization descriptions.
+* **Server-Specific Data:** Each Discord server has its own data storage for players.
+* **Keep-Alive Support:** Flask server for uptime pings ensures the bot stays running when hosted on platforms like Render.
 
 ---
 
 ## Commands
 
-| Command            | Description                                    | Permissions |
-| ------------------ | ---------------------------------------------- | ----------- |
-| `/menu`            | Show specialization selection menu (dropdown). | Everyone    |
-| `/specializations` | Show detailed specialization info.             | Everyone    |
-| `/list`            | List players for a specialization (paginated). | Everyone    |
-| `/all_players`     | Show all players across specializations.       | Everyone    |
-| `/add`             | Add players to a specialization.               | Admin only  |
-| `/remove`          | Remove players from a specialization.          | Admin only  |
-| `/help`            | Show all available commands.                   | Everyone    |
+| Command                            | Description                                                                      |
+| ---------------------------------- | -------------------------------------------------------------------------------- |
+| `/menu`                            | Show the specialization selection menu (dropdown).                               |
+| `/help`                            | Display help message with all available commands.                                |
+| `/specializations`                 | Show detailed specialization information.                                        |
+| `/list <specialization>`           | List all players in a specialization (paginated).                                |
+| `/all_players`                     | Show all players across all specializations for this server.                     |
+| `/add <specialization> <names>`    | **Admin only:** Add players to a specialization. Names are comma-separated.      |
+| `/remove <specialization> <names>` | **Admin only:** Remove players from a specialization. Names are comma-separated. |
 
 ---
 
-## Notes
+## Installation & Setup
 
-* Uses **incremental updates** to PostgreSQL for add/remove operations.
-* Dropdown menus are **persistent**, no need to resend the view after bot restarts.
-* Data persists across redeploys because JSON file is replaced by PostgreSQL.
+1. **Clone the repository:**
+
+```bash
+git clone <repository-url>
+cd <repository-folder>
+```
+
+2. **Install dependencies:**
+
+```bash
+pip install -r requirements.txt
+```
+
+3. **Set up environment variables:**
+
+Create a `.env` file (or set environment variables on Render) with your Discord bot token:
+
+```
+DISCORD_TOKEN=your_discord_bot_token_here
+```
+
+4. **Run the bot locally:**
+
+```bash
+python bot.py
+```
+
+5. **Hosting on Render:**
+
+   * Ensure your Render service exposes port `8080` for keep-alive pings.
+   * Render will automatically keep the Flask server alive, allowing Discord interactions to continue.
 
 ---
 
-## Contribution
+## Data Storage
 
-Feel free to fork and submit PRs.
-Ensure any new features maintain **PostgreSQL persistence**.
+* Players data is stored in a JSON file called `players.json`.
+* Data is structured per server (guild), ensuring separate player lists per Discord server.
+* The bot automatically initializes data for new servers and updates data when new specializations are added.
+
+Example structure:
+
+```json
+{
+  "<guild_id>": {
+    "Weapons Masters": ["Player1", "Player2"],
+    "Armor Masters": [],
+    "Potions Masters": [],
+    "Preparations Masters": [],
+    "Production Masters": []
+  }
+}
+```
+
+---
+
+## Specializations
+
+* **Weapons Masters:** Craft weapons with enhanced quality and chance for Epic gear.
+* **Armor Masters:** Craft armor with improved quality and chance for Epic gear.
+* **Potions Masters:** Create potions with bonus quantity and unique effects.
+* **Preparations Masters:** Produce preparations for free and craft unique items.
+* **Production Masters:** Handle Motes of Yorick with experience and resource benefits.
+
+---
+
+## Contributing
+
+Contributions are welcome! Please fork the repository, make your changes, and open a pull request.
 
 ---
 
 ## License
 
-MIT License
+This project is licensed under the MIT License.
