@@ -329,7 +329,11 @@ async def reminder_loop():
 
         await asyncio.sleep(30)  # check every 30 seconds
 
-bot.loop.create_task(reminder_loop())
+# bot.loop.create_task(reminder_loop())
+@bot.event
+async def on_ready():
+    if not hasattr(bot, "reminder_task"):
+        bot.reminder_task = asyncio.create_task(reminder_loop())
 
 # ------------------------
 # Slash Commands for Reminders
