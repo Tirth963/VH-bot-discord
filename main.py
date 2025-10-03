@@ -1,12 +1,15 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-from discord.ui import View, Select, Button
+from discord.ui import View, Select, Modal, TextInput, Button
 import os
 from flask import Flask
 from threading import Thread
 import psycopg2
 import urllib.parse as up
+import asyncio
+from datetime import datetime, timedelta
+import re
 
 # ------------------------
 # Keep-alive (for Replit/uptime pings)
@@ -131,6 +134,400 @@ def save_data(data, guild_id=None, specialization=None, add=None, remove=None):
     conn.commit()
     cur.close()
     conn.close()
+
+
+# ------------------------
+# Reminder Feature Integration
+# ------------------------
+
+# ------------------------
+# Database Table for Reminders
+# ------------------------
+def init_reminders_db():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS reminders (
+            id SERIAL PRIMARY KEY,
+            guild_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT,
+            channel_id TEXT NOT NULL,
+            role_id TEXT,
+            location TEXT,
+            interval TEXT NOT NULL,
+            day_of_week TEXT,
+            month_day TEXT,
+            event_time TIMESTAMP NOT NULL,
+            pre_reminder_minutes INT DEFAULT 5,
+            enabled BOOLEAN DEFAULT TRUE
+        )
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+init_reminders_db()
+
+# ------------------------
+# Reminder Helpers
+# ------------------------
+async def send_reminder(reminder, pre=False):
+    guild = bot.get_guild(int(reminder['guild_id']))
+    if not guild:
+        return
+    channel = guild.get_channel(int(reminder['channel_id']))
+    if not channel:
+        return
+
+    embed = discord.Embed(
+        title=f"{'⏳ Upcoming Event:' if pre else get_interval_emoji(reminder['interval']) + ' '}{reminder['name']}",
+        description=f"{reminder['description'] or ''}\n"
+                    f"{'Location: ' + reminder['location'] if reminder.get('location') else ''}"
+                    f"{'' if pre else ''}",
+        color=get_interval_color(reminder['interval'])
+    )
+
+    if pre:
+        embed.title = f"⏳ Upcoming Event: {reminder['name']}"
+        embed.description += f"\nStarting in {reminder['pre_reminder_minutes']} minutes!"
+    
+    msg_content = f"<@&{reminder['role_id']}>" if reminder.get('role_id') else None
+    await channel.send(content=msg_content, embed=embed)
+
+def get_interval_emoji(interval):
+    return {
+        "daily": "🔹",
+        "weekly": "🟢",
+        "monthly": "🟣",
+        "one-time": "⚪"
+    }.get(interval.lower(), "⚪")
+
+def get_interval_color(interval):
+    return {
+        "daily": discord.Color.blue(),
+        "weekly": discord.Color.green(),
+        "monthly": discord.Color.purple(),
+        "one-time": discord.Color.light_grey()
+    }.get(interval.lower(), discord.Color.light_grey())
+
+# Fetch all active reminders
+def get_active_reminders():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM reminders WHERE enabled=TRUE")
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    reminders = []
+    for row in rows:
+        reminders.append({
+            'id': row[0],
+            'guild_id': row[1],
+            'name': row[2],
+            'description': row[3],
+            'channel_id': row[4],
+            'role_id': row[5],
+            'location': row[6],
+            'interval': row[7],
+            'day_of_week': row[8],
+            'month_day': row[9],
+            'event_time': row[10],
+            'pre_reminder_minutes': row[11],
+            'enabled': row[12]
+        })
+    return reminders
+
+# Add new reminder to DB
+def add_reminder_to_db(data):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO reminders (
+            guild_id, name, description, channel_id, role_id, location, interval,
+            day_of_week, month_day, event_time, pre_reminder_minutes, enabled
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE)
+    """, (
+        data['guild_id'], data['name'], data.get('description'), data['channel_id'],
+        data.get('role_id'), data.get('location'), data['interval'],
+        data.get('day_of_week'), data.get('month_day'), data['event_time'],
+        data.get('pre_reminder_minutes', 5)
+    ))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+# Remove reminder
+def remove_reminder_from_db(reminder_id):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM reminders WHERE id=%s", (reminder_id,))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+# Enable/disable reminder
+def toggle_reminder_in_db(reminder_id, enable=True):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE reminders SET enabled=%s WHERE id=%s", (enable, reminder_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+# ------------------------
+# Reminder Background Task
+# ------------------------
+async def reminder_loop():
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        now = datetime.utcnow()
+        reminders = get_active_reminders()
+        for r in reminders:
+            event_time = r['event_time']
+            pre_time = event_time - timedelta(minutes=r.get('pre_reminder_minutes', 5))
+
+            # Send pre-reminder
+            if pre_time <= now < pre_time + timedelta(seconds=60):
+                asyncio.create_task(send_reminder(r, pre=True))
+
+            # Send main reminder
+            if event_time <= now < event_time + timedelta(seconds=60):
+                asyncio.create_task(send_reminder(r, pre=False))
+
+                # Handle repeating events
+                if r['interval'] == 'daily':
+                    new_time = event_time + timedelta(days=1)
+                    conn = get_conn()
+                    cur = conn.cursor()
+                    cur.execute("UPDATE reminders SET event_time=%s WHERE id=%s", (new_time, r['id']))
+                    conn.commit()
+                    cur.close()
+                    conn.close()
+                elif r['interval'] == 'weekly':
+                    new_time = event_time + timedelta(weeks=1)
+                    conn = get_conn()
+                    cur = conn.cursor()
+                    cur.execute("UPDATE reminders SET event_time=%s WHERE id=%s", (new_time, r['id']))
+                    conn.commit()
+                    cur.close()
+                    conn.close()
+                elif r['interval'] == 'monthly':
+                    # rough approximation: add 30 days
+                    new_time = event_time + timedelta(days=30)
+                    conn = get_conn()
+                    cur = conn.cursor()
+                    cur.execute("UPDATE reminders SET event_time=%s WHERE id=%s", (new_time, r['id']))
+                    conn.commit()
+                    cur.close()
+                    conn.close()
+                else:
+                    # One-time, disable
+                    toggle_reminder_in_db(r['id'], enable=False)
+
+        await asyncio.sleep(30)  # check every 30 seconds
+
+bot.loop.create_task(reminder_loop())
+
+# ------------------------
+# Slash Commands for Reminders
+# ------------------------
+@bot.tree.command(name="reminder_add", description="Add a new reminder (admin only).")
+@app_commands.describe(
+    name="Event name",
+    description="Optional description",
+    channel="Channel for reminder",
+    time="Time of event (HH:MM or full datetime)",
+    interval="Daily / Weekly / Monthly / One-time",
+    role="Optional role to ping",
+    pre_reminder="Minutes before event for pre-reminder",
+    location="Optional location"
+)
+async def reminder_add(interaction: discord.Interaction, name:str, channel:discord.TextChannel,
+                       time:str, interval:str, description:str=None, role:discord.Role=None,
+                       pre_reminder:int=5, location:str=None):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ You must be an Admin.", ephemeral=True)
+        return
+    # Parse time input
+    try:
+        if len(time.split(":")) == 2:
+            today = datetime.utcnow().date()
+            hours, minutes = map(int, time.split(":"))
+            event_time = datetime.combine(today, datetime.min.time()) + timedelta(hours=hours, minutes=minutes)
+        else:
+            # full datetime
+            event_time = datetime.fromisoformat(time)
+    except Exception:
+        await interaction.response.send_message("❌ Invalid time format.", ephemeral=True)
+        return
+
+    reminder_data = {
+        "guild_id": str(interaction.guild.id),
+        "name": name,
+        "description": description,
+        "channel_id": str(channel.id),
+        "role_id": str(role.id) if role else None,
+        "location": location,
+        "interval": interval.lower(),
+        "event_time": event_time,
+        "pre_reminder_minutes": pre_reminder
+    }
+    add_reminder_to_db(reminder_data)
+    await interaction.response.send_message(f"✅ Reminder **{name}** added.", ephemeral=True)
+
+
+@bot.tree.command(name="reminder_list", description="List all active reminders.")
+async def reminder_list(interaction: discord.Interaction):
+    reminders = get_active_reminders()
+    reminders = [r for r in reminders if r['guild_id'] == str(interaction.guild.id)]
+    if not reminders:
+        await interaction.response.send_message("_No active reminders._", ephemeral=True)
+        return
+
+    embed = discord.Embed(title="Active Reminders", color=discord.Color.green())
+    for r in reminders:
+        embed.add_field(
+            name=r['name'],
+            value=f"Time: {r['event_time']}\n"
+                  f"Channel: <#{r['channel_id']}>\n"
+                  f"Role: <@&{r['role_id']}>\n"
+                  f"Pre-reminder: {r['pre_reminder_minutes']} min",
+            inline=False
+        )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@bot.tree.command(name="reminder_remove", description="Remove a reminder.")
+@app_commands.describe(reminder_id="Reminder ID")
+async def reminder_remove(interaction: discord.Interaction, reminder_id:int):
+    remove_reminder_from_db(reminder_id)
+    await interaction.response.send_message(f"✅ Reminder removed.", ephemeral=True)
+
+
+@bot.tree.command(name="reminder_toggle", description="Enable/disable a reminder.")
+@app_commands.describe(reminder_id="Reminder ID", enable="Enable or disable")
+async def reminder_toggle(interaction: discord.Interaction, reminder_id:int, enable:bool):
+    toggle_reminder_in_db(reminder_id, enable)
+    await interaction.response.send_message(f"✅ Reminder {'enabled' if enable else 'disabled'}.", ephemeral=True)
+
+
+
+# ------------------------
+# Interactive Reminder Modal
+# ------------------------
+
+
+class ReminderModal(Modal):
+    def __init__(self, guild):
+        super().__init__(title="Add New Reminder")
+        self.guild = guild
+
+        self.name_input = TextInput(label="Event Name", placeholder="Enter event name")
+        self.add_item(self.name_input)
+
+        self.desc_input = TextInput(label="Description", placeholder="Optional", required=False)
+        self.add_item(self.desc_input)
+
+        self.time_input = TextInput(label="Time (HH:MM or ISO)", placeholder="HH:MM or YYYY-MM-DDTHH:MM", required=True)
+        self.add_item(self.time_input)
+
+        self.pre_reminder_input = TextInput(label="Pre-reminder (minutes)", placeholder="5", default="5", required=False)
+        self.add_item(self.pre_reminder_input)
+
+        self.location_input = TextInput(label="Location", placeholder="Optional", required=False)
+        self.add_item(self.location_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # Validate time
+        try:
+            time_val = self.time_input.value.strip()
+            if len(time_val.split(":")) == 2:
+                today = datetime.utcnow().date()
+                hours, minutes = map(int, time_val.split(":"))
+                event_time = datetime.combine(today, datetime.min.time()) + timedelta(hours=hours, minutes=minutes)
+            else:
+                event_time = datetime.fromisoformat(time_val)
+        except Exception:
+            await interaction.response.send_message("❌ Invalid time format.", ephemeral=True)
+            return
+
+        # Save to DB
+        reminder_data = {
+            "guild_id": str(self.guild.id),
+            "name": self.name_input.value.strip(),
+            "description": self.desc_input.value.strip() or None,
+            "channel_id": str(self.channel.id),
+            "role_id": str(self.role.id) if hasattr(self, "role") and self.role else None,
+            "location": self.location_input.value.strip() or None,
+            "interval": self.interval if hasattr(self, "interval") else "one-time",
+            "event_time": event_time,
+            "pre_reminder_minutes": int(self.pre_reminder_input.value.strip())
+        }
+        add_reminder_to_db(reminder_data)
+        await interaction.response.send_message(f"✅ Reminder **{reminder_data['name']}** added!", ephemeral=True)
+
+
+class ReminderSetupView(View):
+    def __init__(self, guild):
+        super().__init__(timeout=None)
+        self.guild = guild
+        self.add_item(ChannelSelect(guild))
+        self.add_item(RoleSelect(guild))
+        self.add_item(IntervalSelect())
+
+class ChannelSelect(Select):
+    def __init__(self, guild):
+        options = [
+            discord.SelectOption(label=c.name, value=str(c.id))
+            for c in guild.text_channels
+        ]
+        super().__init__(placeholder="Select Channel", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        self.view.channel = self.view.guild.get_channel(int(self.values[0]))
+        await interaction.response.send_modal(ReminderModal(self.view.guild))
+
+class RoleSelect(Select):
+    def __init__(self, guild):
+        options = [discord.SelectOption(label=r.name, value=str(r.id)) for r in guild.roles if not r.is_default()]
+        options.insert(0, discord.SelectOption(label="No Role", value="none"))
+        super().__init__(placeholder="Select Role (Optional)", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        val = self.values[0]
+        if val != "none":
+            self.view.role = self.view.guild.get_role(int(val))
+        else:
+            self.view.role = None
+
+class IntervalSelect(Select):
+    def __init__(self):
+        options = [
+            discord.SelectOption(label="One-time", value="one-time"),
+            discord.SelectOption(label="Daily", value="daily"),
+            discord.SelectOption(label="Weekly", value="weekly"),
+            discord.SelectOption(label="Monthly", value="monthly")
+        ]
+        super().__init__(placeholder="Select Interval", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        self.view.interval = self.values[0]
+
+
+# ------------------------
+# Command to start interactive setup
+# ------------------------
+@bot.tree.command(name="reminder_setup", description="Interactive setup for new reminder")
+async def reminder_setup(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ You must be an admin.", ephemeral=True)
+        return
+    await interaction.response.send_message("Starting interactive reminder setup...", view=ReminderSetupView(interaction.guild), ephemeral=True)
+
+
 
 
 # ------------------------
@@ -380,6 +777,8 @@ async def menu(interaction: discord.Interaction):
 async def help_cmd(interaction: discord.Interaction):
     embed = discord.Embed(title="Villagers & Heroes — Bot Help",
                           color=discord.Color.green())
+
+    # Existing player & specialization commands
     embed.add_field(name="/menu",
                     value="Show specialization dropdown menu (browse via UI).",
                     inline=False)
@@ -403,7 +802,38 @@ async def help_cmd(interaction: discord.Interaction):
     embed.add_field(name="/remove",
                     value="(Admin only) Remove players from a specialization.",
                     inline=False)
+
+    # New reminder commands
+    embed.add_field(
+        name="/reminder_setup",
+        value=(
+            "Interactive reminder creation.\n"
+            "• Select channel for the reminder.\n"
+            "• Optionally select a role to ping.\n"
+            "• Choose repeat interval: One-time, Daily, Weekly, Monthly.\n"
+            "• Enter event name, description, time, pre-reminder minutes, and location.\n"
+            "• Pre-reminders are sent automatically before the main reminder."
+        ),
+        inline=False
+    )
+    embed.add_field(
+        name="/reminder_list",
+        value="List all scheduled reminders in this server.",
+        inline=False
+    )
+    embed.add_field(
+        name="Time Input",
+        value="Time can be entered as `HH:MM` for today or full ISO datetime `YYYY-MM-DDTHH:MM` for one-time events.",
+        inline=False
+    )
+    embed.add_field(
+        name="Pre-Reminders",
+        value="A separate embed is sent before the main reminder, showing event name, time left, location, description, and tagging role if selected.",
+        inline=False
+    )
+
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
 
 @bot.tree.command(name="specializations",
