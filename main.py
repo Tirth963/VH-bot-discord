@@ -9,7 +9,8 @@ import psycopg2
 import urllib.parse as up
 import asyncio
 from datetime import datetime, timedelta
-import re
+from discord import  Interaction, TextChannel, Role, SelectOption, Embed, Color
+
 
 # ------------------------
 # Keep-alive (for Replit/uptime pings)
@@ -423,32 +424,66 @@ async def reminder_toggle(interaction: discord.Interaction, reminder_id:int, ena
 # Interactive Reminder Modal
 # ------------------------
 
-
+# ------------------------
+# Reminder Modal (Add / Edit)
+# ------------------------
 class ReminderModal(Modal):
-    def __init__(self, guild):
-        super().__init__(title="Add New Reminder")
+    def __init__(self, guild, channel=None, role=None, interval="one-time", reminder_data=None):
+        """
+        reminder_data: dict for editing existing reminder, None for new reminder
+        """
+        super().__init__(title="Reminder Setup")
         self.guild = guild
+        self.channel = channel
+        self.role = role
+        self.interval = interval
+        self.reminder_data = reminder_data  # existing data if editing
 
-        self.name_input = TextInput(label="Event Name", placeholder="Enter event name")
+        # Pre-fill values if editing
+        self.name_input = TextInput(
+            label="Event Name",
+            placeholder="Enter event name",
+            default=reminder_data['name'] if reminder_data else ""
+        )
         self.add_item(self.name_input)
 
-        self.desc_input = TextInput(label="Description", placeholder="Optional", required=False)
+        self.desc_input = TextInput(
+            label="Description",
+            placeholder="Optional",
+            required=False,
+            default=reminder_data['description'] if reminder_data else ""
+        )
         self.add_item(self.desc_input)
 
-        self.time_input = TextInput(label="Time (HH:MM or ISO)", placeholder="HH:MM or YYYY-MM-DDTHH:MM", required=True)
+        self.time_input = TextInput(
+            label="Time (HH:MM or ISO)",
+            placeholder="HH:MM or YYYY-MM-DDTHH:MM",
+            required=True,
+            default=reminder_data['event_time'].strftime("%Y-%m-%dT%H:%M") if reminder_data else ""
+        )
         self.add_item(self.time_input)
 
-        self.pre_reminder_input = TextInput(label="Pre-reminder (minutes)", placeholder="5", default="5", required=False)
+        self.pre_reminder_input = TextInput(
+            label="Pre-reminder (minutes)",
+            placeholder="5",
+            default=str(reminder_data['pre_reminder_minutes'] if reminder_data else 5),
+            required=False
+        )
         self.add_item(self.pre_reminder_input)
 
-        self.location_input = TextInput(label="Location", placeholder="Optional", required=False)
+        self.location_input = TextInput(
+            label="Location",
+            placeholder="Optional",
+            required=False,
+            default=reminder_data['location'] if reminder_data else ""
+        )
         self.add_item(self.location_input)
 
-    async def on_submit(self, interaction: discord.Interaction):
+    async def on_submit(self, interaction: Interaction):
         # Validate time
         try:
             time_val = self.time_input.value.strip()
-            if len(time_val.split(":")) == 2:
+            if len(time_val.split(":")) == 2:  # HH:MM format
                 today = datetime.utcnow().date()
                 hours, minutes = map(int, time_val.split(":"))
                 event_time = datetime.combine(today, datetime.min.time()) + timedelta(hours=hours, minutes=minutes)
@@ -458,49 +493,89 @@ class ReminderModal(Modal):
             await interaction.response.send_message("❌ Invalid time format.", ephemeral=True)
             return
 
-        # Save to DB
-        reminder_data = {
+        # Validate pre_reminder
+        try:
+            pre_minutes = int(self.pre_reminder_input.value.strip())
+        except Exception:
+            pre_minutes = 5
+
+        reminder_payload = {
             "guild_id": str(self.guild.id),
             "name": self.name_input.value.strip(),
             "description": self.desc_input.value.strip() or None,
-            "channel_id": str(self.channel.id),
-            "role_id": str(self.role.id) if hasattr(self, "role") and self.role else None,
+            "channel_id": str(self.channel.id) if self.channel else None,
+            "role_id": str(self.role.id) if self.role else None,
             "location": self.location_input.value.strip() or None,
-            "interval": self.interval if hasattr(self, "interval") else "one-time",
+            "interval": self.interval.lower(),
             "event_time": event_time,
-            "pre_reminder_minutes": int(self.pre_reminder_input.value.strip())
+            "pre_reminder_minutes": pre_minutes
         }
-        add_reminder_to_db(reminder_data)
-        await interaction.response.send_message(f"✅ Reminder **{reminder_data['name']}** added!", ephemeral=True)
 
+        try:
+            if self.reminder_data:
+                # Editing existing reminder
+                reminder_id = self.reminder_data['id']
+                conn = get_conn()
+                cur = conn.cursor()
+                cur.execute("""
+                    UPDATE reminders SET
+                        name=%s, description=%s, channel_id=%s, role_id=%s, location=%s,
+                        interval=%s, event_time=%s, pre_reminder_minutes=%s
+                    WHERE id=%s
+                """, (
+                    reminder_payload['name'], reminder_payload['description'], reminder_payload['channel_id'],
+                    reminder_payload['role_id'], reminder_payload['location'], reminder_payload['interval'],
+                    reminder_payload['event_time'], reminder_payload['pre_reminder_minutes'], reminder_id
+                ))
+                conn.commit()
+                cur.close()
+                conn.close()
+                await interaction.response.send_message(f"✅ Reminder **{reminder_payload['name']}** updated!", ephemeral=True)
+            else:
+                # New reminder
+                add_reminder_to_db(reminder_payload)
+                await interaction.response.send_message(f"✅ Reminder **{reminder_payload['name']}** added!", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error saving reminder: {e}", ephemeral=True)
 
+# ------------------------
+# Reminder Setup View
+# ------------------------
 class ReminderSetupView(View):
-    def __init__(self, guild):
+    def __init__(self, guild, reminder_data=None):
         super().__init__(timeout=None)
         self.guild = guild
+        self.reminder_data = reminder_data
+        self.channel = None
+        self.role = None
+        self.interval = "one-time"
+
         self.add_item(ChannelSelect(guild))
         self.add_item(RoleSelect(guild))
         self.add_item(IntervalSelect())
 
 class ChannelSelect(Select):
     def __init__(self, guild):
-        options = [
-            discord.SelectOption(label=c.name, value=str(c.id))
-            for c in guild.text_channels
-        ]
+        options = [SelectOption(label=c.name, value=str(c.id)) for c in guild.text_channels]
         super().__init__(placeholder="Select Channel", min_values=1, max_values=1, options=options)
 
-    async def callback(self, interaction: discord.Interaction):
+    async def callback(self, interaction: Interaction):
         self.view.channel = self.view.guild.get_channel(int(self.values[0]))
-        await interaction.response.send_modal(ReminderModal(self.view.guild))
+        await interaction.response.send_modal(ReminderModal(
+            self.view.guild, 
+            channel=self.view.channel, 
+            role=getattr(self.view, "role", None),
+            interval=getattr(self.view, "interval", "one-time"),
+            reminder_data=getattr(self.view, "reminder_data", None)
+        ))
 
 class RoleSelect(Select):
     def __init__(self, guild):
-        options = [discord.SelectOption(label=r.name, value=str(r.id)) for r in guild.roles if not r.is_default()]
-        options.insert(0, discord.SelectOption(label="No Role", value="none"))
+        options = [SelectOption(label=r.name, value=str(r.id)) for r in guild.roles if not r.is_default()]
+        options.insert(0, SelectOption(label="No Role", value="none"))
         super().__init__(placeholder="Select Role (Optional)", min_values=1, max_values=1, options=options)
 
-    async def callback(self, interaction: discord.Interaction):
+    async def callback(self, interaction: Interaction):
         val = self.values[0]
         if val != "none":
             self.view.role = self.view.guild.get_role(int(val))
@@ -510,26 +585,76 @@ class RoleSelect(Select):
 class IntervalSelect(Select):
     def __init__(self):
         options = [
-            discord.SelectOption(label="One-time", value="one-time"),
-            discord.SelectOption(label="Daily", value="daily"),
-            discord.SelectOption(label="Weekly", value="weekly"),
-            discord.SelectOption(label="Monthly", value="monthly")
+            SelectOption(label="One-time", value="one-time"),
+            SelectOption(label="Daily", value="daily"),
+            SelectOption(label="Weekly", value="weekly"),
+            SelectOption(label="Monthly", value="monthly")
         ]
         super().__init__(placeholder="Select Interval", min_values=1, max_values=1, options=options)
 
-    async def callback(self, interaction: discord.Interaction):
+    async def callback(self, interaction: Interaction):
         self.view.interval = self.values[0]
 
+# ------------------------
+# Edit / Remove Reminder Dropdowns
+# ------------------------
+class ReminderSelect(Select):
+    def __init__(self, guild, action="edit"):
+        self.guild = guild
+        self.action = action
+        reminders = get_active_reminders()
+        reminders = [r for r in reminders if r['guild_id'] == str(guild.id)]
+        options = [SelectOption(label=f"{r['name']} ({r['event_time']})", value=str(r['id'])) for r in reminders]
+        placeholder = "Select reminder to edit" if action=="edit" else "Select reminder to remove"
+        super().__init__(placeholder=placeholder, min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: Interaction):
+        reminder_id = int(self.values[0])
+        reminder_data = None
+        if self.action == "edit":
+            reminders = get_active_reminders()
+            reminder_data = next((r for r in reminders if r['id']==reminder_id), None)
+            if reminder_data:
+                await interaction.response.send_modal(ReminderModal(
+                    self.guild,
+                    channel=self.guild.get_channel(int(reminder_data['channel_id'])),
+                    role=self.guild.get_role(int(reminder_data['role_id'])) if reminder_data['role_id'] else None,
+                    interval=reminder_data['interval'],
+                    reminder_data=reminder_data
+                ))
+        else:
+            remove_reminder_from_db(reminder_id)
+            await interaction.response.send_message("✅ Reminder removed.", ephemeral=True)
+
+class ReminderActionView(View):
+    def __init__(self, guild, action="edit"):
+        super().__init__(timeout=None)
+        self.add_item(ReminderSelect(guild, action=action))
 
 # ------------------------
-# Command to start interactive setup
+# Slash Commands
 # ------------------------
 @bot.tree.command(name="reminder_setup", description="Interactive setup for new reminder")
-async def reminder_setup(interaction: discord.Interaction):
+async def reminder_setup(interaction: Interaction):
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("❌ You must be an admin.", ephemeral=True)
         return
     await interaction.response.send_message("Starting interactive reminder setup...", view=ReminderSetupView(interaction.guild), ephemeral=True)
+
+@bot.tree.command(name="reminder_edit", description="Edit an existing reminder")
+async def reminder_edit(interaction: Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ Admin only.", ephemeral=True)
+        return
+    await interaction.response.send_message("Select reminder to edit:", view=ReminderActionView(interaction.guild, action="edit"), ephemeral=True)
+
+@bot.tree.command(name="reminder_remove_ui", description="Remove a reminder via selection")
+async def reminder_remove_ui(interaction: Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ Admin only.", ephemeral=True)
+        return
+    await interaction.response.send_message("Select reminder to remove:", view=ReminderActionView(interaction.guild, action="remove"), ephemeral=True)
+
 
 
 
